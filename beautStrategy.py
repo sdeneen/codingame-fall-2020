@@ -27,31 +27,40 @@ class IngredientTier(Enum):
     TIER_3: "TIER_3"
 
 
+class Ingredients(StringRepresenter):
+    def __init__(self, tier0, tier1, tier2, tier3):
+        self.tier0 = tier0
+        self.tier1 = tier1
+        self.tier2 = tier2
+        self.tier3 = tier3
+
+    def get(self, tier: IngredientTier) -> int:
+        if tier is IngredientTier.TIER_0:
+            return self.tier0
+        elif tier is IngredientTier.TIER_1:
+            return self.tier1
+        elif tier is IngredientTier.TIER_2:
+            return self.tier2
+        elif tier is IngredientTier.TIER_3:
+            return self.tier3
+
+
 class ClientOrder(StringRepresenter):
-    def __init__(self, orderId, numBlue, numGreen, numOrange, numYellow, price):
+    def __init__(self, orderId, tier0, tier1, tier2, tier3, price):
         self.orderId = orderId
-        self.numBlue = numBlue
-        self.numGreen = numGreen
-        self.numOrange = numOrange
-        self.numYellow = numYellow
+        self.ingredients = Ingredients(tier0, tier1, tier2, tier3)
         self.price = price
 
 
 class Inventory(StringRepresenter):
-    def __init__(self, numBlue, numGreen, numOrange, numYellow):
-        self.numBlue = numBlue
-        self.numGreen = numGreen
-        self.numOrange = numOrange
-        self.numYellow = numYellow
+    def __init__(self, tier0, tier1, tier2, tier3):
+        self.ingredients = Ingredients(tier0, tier1, tier2, tier3)
 
 
 class Spell(StringRepresenter):
-    def __init__(self, spellId, numBlue, numGreen, numOrange, numYellow, castable):
+    def __init__(self, spellId, tier0, tier1, tier2, tier3, castable):
         self.spellId = spellId
-        self.numBlue = numBlue
-        self.numGreen = numGreen
-        self.numOrange = numOrange
-        self.numYellow = numYellow
+        self.ingredients = Ingredients(tier0, tier1, tier2, tier3)
         self.castable = castable != 0
 
 
@@ -62,10 +71,11 @@ class Witch(StringRepresenter):
         self.spells = spells
 
     def hasIngredientsForOrder(self, order: ClientOrder) -> bool:
-        return self.inventory.numBlue >= order.numBlue and \
-               self.inventory.numGreen >= order.numGreen and \
-               self.inventory.numOrange >= order.numOrange and \
-               self.inventory.numYellow >= order.numYellow
+        for tier in IngredientTier:
+            if self.inventory.ingredients.get(tier) < order.ingredients.get(tier):
+                return False
+
+        return True
 
 
 class GameState(StringRepresenter):
@@ -94,7 +104,6 @@ def parseInput() -> GameState:
     return GameState(witches, clientOrders)
 
 
-# TODO (mv): update this method to handle parsing orders and spells (us and them)
 def parseClientOrdersOurSpellsTheirSpells() -> [ClientOrder]:
     clientOrders = []
     ourSpells = []
