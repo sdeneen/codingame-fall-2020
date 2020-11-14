@@ -43,16 +43,32 @@ class Witch(StringRepresenter):
         self.inventory = inventory
         self.rupees = rupees
 
+    def hasIngredientsForOrder(self, order: ClientOrder) -> bool:
+        return self.inventory.numBlue >= order.numBlue and \
+               self.inventory.numGreen >= order.numGreen and \
+               self.inventory.numOrange >= order.numOrange and \
+               self.inventory.numYellow >= order.numYellow
+
 
 class GameState(StringRepresenter):
     def __init__(self, witches, clientOrders):
         self.witches = witches
         self.clientOrders = clientOrders
 
+    def getOurWitch(self) -> Witch:
+        return self.witches[0]
 
-#####################
-######## Algo #######
-#####################
+    def getOrdersSortedByPriceDesc(self) -> [ClientOrder]:
+        return sorted(self.clientOrders, key=lambda o: o.price, reverse=True)
+
+    @staticmethod
+    def brew(order: ClientOrder) -> None:
+        print(f"{ActionType.BREW.value} {order.orderId}")
+
+##############################
+######## Input parsing #######
+##############################
+
 
 def parseInput() -> GameState:
     clientOrders = parseClientOrders()
@@ -73,7 +89,7 @@ def parseClientOrders() -> [ClientOrder]:
         action_type = ActionType[action_type]
         if action_type is ActionType.BREW:
             clientOrders.append(
-                ClientOrder(action_id, int(delta_0), int(delta_1), int(delta_2), int(delta_3), int(price))
+                ClientOrder(action_id, abs(int(delta_0)), abs(int(delta_1)), abs(int(delta_2)), abs(int(delta_3)), abs(int(price)))
             )
         # tome_index = int(tome_index)
         # tax_count = int(tax_count)
@@ -93,11 +109,18 @@ def parseWitches():
 
     return witches
 
+#####################
+######## Algo #######
+#####################
+
 
 def runAlgo(gameState: GameState):
-    # TODO (mv): brew 2 pots
-    pass
+    ourWitch = gameState.getOurWitch()
+    sortedOrders = gameState.getOrdersSortedByPriceDesc()
+
+    for order in sortedOrders:
+        if ourWitch.hasIngredientsForOrder(order):
+            gameState.brew(order)
 
 
-gameState = parseInput()
-runAlgo(gameState)
+runAlgo(parseInput())
