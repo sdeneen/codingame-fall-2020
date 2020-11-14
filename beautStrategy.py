@@ -20,6 +20,13 @@ class ActionType(Enum):
     BREW = "BREW"
 
 
+class IngredientTier(Enum):
+    TIER_0: "TIER_0"
+    TIER_1: "TIER_1"
+    TIER_2: "TIER_2"
+    TIER_3: "TIER_3"
+
+
 class ClientOrder(StringRepresenter):
     def __init__(self, orderId, numBlue, numGreen, numOrange, numYellow, price):
         self.orderId = orderId
