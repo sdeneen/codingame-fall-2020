@@ -38,10 +38,21 @@ class Inventory(StringRepresenter):
         self.numYellow = numYellow
 
 
+class Spell(StringRepresenter):
+    def __init__(self, spellId, numBlue, numGreen, numOrange, numYellow, castable):
+        self.spellId = spellId
+        self.numBlue = numBlue
+        self.numGreen = numGreen
+        self.numOrange = numOrange
+        self.numYellow = numYellow
+        self.castable = castable != 0
+
+
 class Witch(StringRepresenter):
-    def __init__(self, inventory: Inventory, rupees: int):
+    def __init__(self, inventory: Inventory, rupees: int, spells: [Spell]):
         self.inventory = inventory
         self.rupees = rupees
+        self.spells = spells
 
     def hasIngredientsForOrder(self, order: ClientOrder) -> bool:
         return self.inventory.numBlue >= order.numBlue and \
@@ -71,13 +82,16 @@ class GameState(StringRepresenter):
 
 
 def parseInput() -> GameState:
-    clientOrders = parseClientOrders()
-    witches = parseWitches()
+    clientOrders, ourSpells, theirSpells = parseClientOrdersOurSpellsTheirSpells()
+    witches = parseWitches(ourSpells, theirSpells)
     return GameState(witches, clientOrders)
 
 
-def parseClientOrders() -> [ClientOrder]:
+# TODO (mv): update this method to handle parsing orders and spells (us and them)
+def parseClientOrdersOurSpellsTheirSpells() -> [ClientOrder]:
     clientOrders = []
+    ourSpells = []
+    theirSpells = []
     action_count = int(input())  # the number of spells and recipes in play
     for i in range(action_count):
         # tome_index: in the first two leagues: always 0; later: the index in the tome if this is a tome spell, equal to the read-ahead tax; For brews, this is the value of the current urgency bonus
@@ -91,21 +105,37 @@ def parseClientOrders() -> [ClientOrder]:
             clientOrders.append(
                 ClientOrder(action_id, abs(int(delta_0)), abs(int(delta_1)), abs(int(delta_2)), abs(int(delta_3)), abs(int(price)))
             )
+        elif action_type is ActionType.CAST:
+            ourSpells.append(
+                Spell(action_id, int(delta_0), int(delta_1), int(delta_2), int(delta_3), int(castable))
+            )
+        elif action_type is ActionType.OPPONENT_CAST:
+            theirSpells.append(
+                Spell(action_id, int(delta_0), int(delta_1), int(delta_2), int(delta_3), int(castable))
+            )
+        else:
+            raise ValueError(f"Unknown action type {action_type}")
         # tome_index = int(tome_index)
         # tax_count = int(tax_count)
         # castable = castable != "0"
         # repeatable = repeatable != "0"
-    return clientOrders
+    return clientOrders, ourSpells, theirSpells
 
 
-def parseWitches():
+def parseWitches(ourSpells: [Spell], theirSpells: [Spell]):
     witches = []
 
     for i in range(2):
         # inv_0: tier-0 ingredients in inventory
         # score: amount of rupees
         inv_0, inv_1, inv_2, inv_3, rupees = [int(j) for j in input().split()]
-        witches.append(Witch(Inventory(inv_0, inv_1, inv_2, inv_3), rupees))
+        witches.append(
+            Witch(
+                Inventory(inv_0, inv_1, inv_2, inv_3),
+                rupees,
+                ourSpells if i == 0 else theirSpells
+            )
+        )
 
     return witches
 
@@ -115,6 +145,7 @@ def parseWitches():
 
 
 def runAlgo(gameState: GameState):
+    print(gameState)
     ourWitch = gameState.getOurWitch()
     sortedOrders = gameState.getOrdersSortedByPriceDesc()
 
