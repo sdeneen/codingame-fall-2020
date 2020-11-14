@@ -1,0 +1,39 @@
+CodinGame Fall Challenge 2020
+
+Strategy
+
+To consider
+	* Most rupees
+	* Spells 
+	* Disappearing orders
+
+1) Speed
+	* Build 3 pots as fast as possible
+		* Given a set of orders, return the number of turns it'd take for each order.
+			* Witch method
+				* getActionsPerOrder(orders) 
+					* -> { id: { "actions" : [] } }
+					* pick least actions with highest price
+				* actionsToGetIngredient(ingredient)
+					* Given an ingredient, return all possible action paths that can lead to that ingredient and return the resulting inventory
+					* -> [
+						{actions: [], resultingInventory: []}, 
+						{actions: [], resultingInventory: []}, 
+						...
+						] 
+					or None (not possible)
+				* actionsToGetInventory(minInventory: [1,2,4,0])
+					* given a minimum required inventory, return all action paths that can lead to that inventory and resulting inventory
+					* -> [
+						{actions: [], resultingInventory: []}, 
+						{actions: [], resultingInventory: []}, 
+						...
+						]
+					or None (not possible)
+					* Future: think about how to minimize losses in spells and inventory. Trade off between speed in building a single order and impact on future orders.
+				* chooseActionPath([ {actions} ])
+					* Given a set of action paths, return the best action path
+					* -> {actions: [], resultingInventory: []}
+		* Choose the fastest order each time
+2) Efficent High Score
+	* Build pots that give the most pots
