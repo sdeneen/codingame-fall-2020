@@ -37,3 +37,8 @@ To consider
 		* Choose the fastest order each time
 2) Efficent High Score
 	* Build pots that give the most pots
+
+Next steps
+* Remove Inventory object
+* Parse new input
+* Figure out strategy updates
