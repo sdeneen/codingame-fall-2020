@@ -101,20 +101,15 @@ class Ingredients(StringRepresenter):
         return Ingredients(dict)
 
 
-class Inventory(StringRepresenter):
-    def __init__(self, ingredients: Ingredients):
-        self.ingredients = ingredients
-
-
 class ActionPath(StringRepresenter):
-    def __init__(self, actions: [str], resultingInventory: Inventory):
+    def __init__(self, actions: [str], resultingInventory: Ingredients):
         self.__actions = actions
         self.__resultingInventory = resultingInventory
 
     def getActions(self) -> [str]:
         return self.__actions
 
-    def getResultingInventory(self) -> Inventory:
+    def getResultingInventory(self) -> Ingredients:
         return self.__resultingInventory
 
 
@@ -152,7 +147,7 @@ class TomeSpell(StringRepresenter):
 
 
 class SpellTraversalNode(StringRepresenter):
-    def __init__(self, missingIngredients: Ingredients, futureSpellCastsRequiredBeforeRest: Dict[str, int], availableInventory: Inventory, reverseActionList: [str]):
+    def __init__(self, missingIngredients: Ingredients, futureSpellCastsRequiredBeforeRest: Dict[str, int], availableInventory: Ingredients, reverseActionList: [str]):
         self.__missingIngredients = missingIngredients
         self.__numSpellCastsRequiredBeforeNextRest = futureSpellCastsRequiredBeforeRest
         self.__availableInventory = availableInventory
@@ -161,7 +156,7 @@ class SpellTraversalNode(StringRepresenter):
     def getMissingIngredients(self) -> Ingredients:
         return self.__missingIngredients
 
-    def getAvailableInventory(self) -> Inventory:
+    def getAvailableInventory(self) -> Ingredients:
         return self.__availableInventory
 
     def getNumSpellCastsRequiredBeforeNextRest(self) -> Dict[str, int]:
@@ -173,23 +168,23 @@ class SpellTraversalNode(StringRepresenter):
 
 
 class Witch(StringRepresenter):
-    def __init__(self, inventory: Inventory, rupees: int, spells: [Spell]):
+    def __init__(self, inventory: Ingredients, rupees: int, spells: [Spell]):
         self.inventory = inventory
         self.rupees = rupees
         self.spellsById: Dict[str, Spell] = {
-            spell.spellIndex : spell for spell in spells
+            spell.spellId : spell for spell in spells
         }
 
     def hasIngredientsForOrder(self, order: ClientOrder) -> bool:
         for tier in IngredientTier:
-            if self.inventory.ingredients.getQuantity(tier) < order.ingredients.getQuantity(tier):
+            if self.inventory.getQuantity(tier) < order.ingredients.getQuantity(tier):
                 return False
 
         return True
 
 
     # This looks up possible action paths to get missing ingredients, searching a tree from the root where the final action leads to the root, and the first action for each action path is a link to a leaf node
-    def actionsToGetMissingIngredients(self, startingInventory: Inventory, missingIngredients: Ingredients) -> [ActionPath]:
+    def actionsToGetMissingIngredients(self, startingInventory: Ingredients, missingIngredients: Ingredients) -> [ActionPath]:
         actionsPathsResult = []
         spellsById = self.spellsById
         stack = deque()
@@ -229,9 +224,9 @@ class Witch(StringRepresenter):
 
                     # Simulate inventory update after casting the spell, and keep track of what ingredients we are still missing
                     ingredientsCost = spell.ingredients.getNegativeQuantities()
-                    resultingIngredients = curAvailableInventory.ingredients.merge(ingredientsCost)
+                    resultingIngredients = curAvailableInventory.merge(ingredientsCost)
                     newMissingIngredients = resultingIngredients.getNegativeQuantities()
-                    remainingInventory = Inventory(resultingIngredients.getPositiveQuantities())
+                    remainingInventory = resultingIngredients.getPositiveQuantities()
 
                     # If we have the ingredients needed already on hand then we don't need to do any more casting (leaf node!)
                     # Finalize the action path
@@ -255,9 +250,9 @@ class Witch(StringRepresenter):
 
     # Right now this just picks the shortest action path to get the highest tier missing ingredient
     # Needs a real algo that looks at all missing ingredients to figure out in what order to fulfill them (ideally optimizing rests)
-    def actionsToGetInventory(self, desiredInventory: Inventory) -> Optional[ActionPath]:
-        ingredientsDiff = self.inventory.ingredients.diff(desiredInventory.ingredients)
-        remainingInventory = Inventory(ingredientsDiff.getPositiveQuantities())
+    def actionsToGetInventory(self, desiredInventory: Ingredients) -> Optional[ActionPath]:
+        ingredientsDiff = self.inventory.diff(desiredInventory)
+        remainingInventory = ingredientsDiff.getPositiveQuantities()
         missingIngredients = ingredientsDiff.getNegativeQuantities()
 
         if missingIngredients.hasNoNegativeQuantities():
@@ -346,7 +341,7 @@ def parseWitches(ourSpells: [Spell], theirSpells: [Spell]):
         ingredients = Ingredients.fromTierArgs(inv_0, inv_1, inv_2, inv_3)
         witches.append(
             Witch(
-                Inventory(ingredients),
+                ingredients,
                 rupees,
                 ourSpells if i == 0 else theirSpells
             )
@@ -379,7 +374,7 @@ def runAlgo(gameState: GameState):
     ourWitch = gameState.getOurWitch()
     sortedOrders = gameState.getOrdersSortedByPriceDesc()
     order = sortedOrders[-1]
-    actionPath = ourWitch.actionsToGetInventory(Inventory(order.ingredients))
+    actionPath = ourWitch.actionsToGetInventory(order.ingredients)
     if actionPath is None:
         # Shouldn't happen? Hopefully
         print(ActionType.REST.value)
