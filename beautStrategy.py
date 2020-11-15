@@ -144,10 +144,11 @@ class Spell(StringRepresenter):
 
 
 class TomeSpell(StringRepresenter):
-    def __init__(self, spellId, tier0, tier1, tier2, tier3, taxCount):
+    def __init__(self, spellId, spellIndex, tier0, tier1, tier2, tier3, tier0Earned):
         self.spellId = spellId
+        self.spellIndex = spellIndex
         self.ingredients = Ingredients.fromTierArgs(tier0, tier1, tier2, tier3)
-        self.taxCount = taxCount
+        self.tier0Earned = tier0Earned
 
 
 class SpellTraversalNode(StringRepresenter):
@@ -176,7 +177,7 @@ class Witch(StringRepresenter):
         self.inventory = inventory
         self.rupees = rupees
         self.spellsById: Dict[str, Spell] = {
-            spell.spellId : spell for spell in spells
+            spell.spellIndex : spell for spell in spells
         }
 
     def hasIngredientsForOrder(self, order: ClientOrder) -> bool:
@@ -324,7 +325,7 @@ def parseClientOrdersOurSpellsTheirSpellsTomeSpells() -> [ClientOrder]:
             )
         elif action_type is ActionType.LEARN:
             tomeSpells.append(
-                TomeSpell(tome_index, int(delta_0), int(delta_1), int(delta_2), int(delta_3), tax_count)
+                TomeSpell(action_id, tome_index, int(delta_0), int(delta_1), int(delta_2), int(delta_3), tax_count)
             )
         else:
             raise ValueError(f"Unknown action type {action_type}")
