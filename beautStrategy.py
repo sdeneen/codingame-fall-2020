@@ -286,7 +286,7 @@ def parseInput() -> GameState:
     witches, witchInputLines = parseWitches(ourSpells, theirSpells)
     mainInputLines.extend(witchInputLines)
     # Uncomment this to print the game input (useful to record test cases)
-    # print(mainInputLines)
+    logDebug("\n".join(mainInputLines))
     return GameState(witches, clientOrders, tomeSpells)
 
 
@@ -320,7 +320,7 @@ def parseClientOrdersOurSpellsTheirSpellsTomeSpells() -> [ClientOrder]:
             )
         elif action_type is ActionType.LEARN:
             tomeSpells.append(
-                TomeSpell(action_id, tome_index, int(delta_0), int(delta_1), int(delta_2), int(delta_3), tax_count)
+                TomeSpell(action_id, int(tome_index), int(delta_0), int(delta_1), int(delta_2), int(delta_3), tax_count)
             )
         else:
             raise ValueError(f"Unknown action type {action_type}")
@@ -371,17 +371,36 @@ def findShortestActionPath(actionPaths: [ActionPath]) -> Optional[ActionPath]:
 
 
 def runAlgo(gameState: GameState):
+    learnSpellMaybe = testTomeAlgo(gameState)
+    if learnSpellMaybe is not None:
+        logDebug("LEARNING A PSLELELELELLE")
+        return print(learnSpellMaybe)
+
     ourWitch = gameState.getOurWitch()
     sortedOrders = gameState.getOrdersSortedByPriceDesc()
     order = sortedOrders[-1]
     actionPath = ourWitch.actionsToGetInventory(order.ingredients)
     if actionPath is None:
         # Shouldn't happen? Hopefully
+        logDebug("Ay dios mio. No action path found!!")
         print(ActionType.REST.value)
     elif len(actionPath.getActions()) == 0:
         print(order.getBrewAction())
     else:
         print(actionPath.getActions()[0])
+
+
+def testTomeAlgo(gameState: GameState) -> Optional[str]:
+    def isCheapAndCanAfford(spell: TomeSpell):
+        return spell.ingredients.hasNoNegativeQuantities() \
+               and gameState.getOurWitch().inventory.getQuantity(IngredientTier.TIER_0) >= spell.spellIndex
+
+    for spell in [t for t in gameState.tomeSpells if t.spellIndex <= 3]:
+        if isCheapAndCanAfford(spell):
+            return f"{ActionType.LEARN.value} {spell.spellId}"
+
+    return None
+
 
 while True:
     runAlgo(parseInput())
