@@ -252,13 +252,13 @@ class Witch(StringRepresenter):
     # Needs a real algo that looks at all missing ingredients to figure out in what order to fulfill them (ideally optimizing rests)
     def actionsToGetInventory(self, desiredInventory: Ingredients) -> Optional[ActionPath]:
         ingredientsDiff = self.inventory.diff(desiredInventory)
-        remainingInventory = ingredientsDiff.getPositiveQuantities()
+        remainingIngredients = ingredientsDiff.getPositiveQuantities()
         missingIngredients = ingredientsDiff.getNegativeQuantities()
 
         if missingIngredients.hasNoNegativeQuantities():
-            return ActionPath([], remainingInventory)
+            return ActionPath([], remainingIngredients)
 
-        possibleActionPaths = self.actionsToGetMissingIngredients(remainingInventory, missingIngredients)
+        possibleActionPaths = self.actionsToGetMissingIngredients(remainingIngredients, missingIngredients)
         chosenActionPath = findShortestActionPath(possibleActionPaths)
         return chosenActionPath
 
