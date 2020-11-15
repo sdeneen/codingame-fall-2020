@@ -26,12 +26,14 @@ class ActionType(Enum):
 
 
 class IngredientTier(Enum):
-
     TIER_0 = 0
     TIER_1 = 1
     TIER_2 = 2
     TIER_3 = 3
 
+    @staticmethod
+    def getIngredientTierForNum(tierNum: int) -> 'IngredientTier':
+        return IngredientTier(tierNum)
 
 
 class Ingredients(StringRepresenter):
@@ -92,7 +94,7 @@ class Ingredients(StringRepresenter):
         i = 0
         dict = {}
         while i < len(tiers) and i < len(IngredientTier):
-            tier = getIngredientTierForNum(i)
+            tier = IngredientTier.getIngredientTierForNum(i)
             dict[tier] = tiers[i]
             i += 1
 
@@ -117,13 +119,15 @@ class ActionPath(StringRepresenter):
 
 
 class ClientOrder(StringRepresenter):
-    def __init__(self, orderId, tier0, tier1, tier2, tier3, price):
+    def __init__(self, orderId, tier0, tier1, tier2, tier3, price, urgencyBonus):
         self.orderId = orderId
         self.ingredients = Ingredients.fromTierArgs(tier0, tier1, tier2, tier3)
-        self.price = price
+        self.price = price  # includes urgency bonus already
+        self.urgencyBonus = urgencyBonus
 
     def getBrewAction(self) -> str:
         return f"{ActionType.BREW.value} {self.orderId}"
+
 
 class Spell(StringRepresenter):
     def __init__(self, spellId, tier0, tier1, tier2, tier3, castable):
@@ -137,6 +141,14 @@ class Spell(StringRepresenter):
 
     def getActionToCast(self) -> str:
         return f"{ActionType.CAST.value} {self.spellId}"
+
+
+class TomeSpell(StringRepresenter):
+    def __init__(self, spellId, spellIndex, tier0, tier1, tier2, tier3, tier0Earned):
+        self.spellId = spellId
+        self.spellIndex = spellIndex
+        self.ingredients = Ingredients.fromTierArgs(tier0, tier1, tier2, tier3)
+        self.tier0Earned = tier0Earned
 
 
 class SpellTraversalNode(StringRepresenter):
@@ -165,7 +177,7 @@ class Witch(StringRepresenter):
         self.inventory = inventory
         self.rupees = rupees
         self.spellsById: Dict[str, Spell] = {
-            spell.spellId : spell for spell in spells
+            spell.spellIndex : spell for spell in spells
         }
 
     def hasIngredientsForOrder(self, order: ClientOrder) -> bool:
@@ -256,13 +268,11 @@ class Witch(StringRepresenter):
         return chosenActionPath
 
 
-
-
-
 class GameState(StringRepresenter):
-    def __init__(self, witches, clientOrders):
+    def __init__(self, witches, clientOrders, tomeSpells):
         self.witches = witches
         self.clientOrders = clientOrders
+        self.tomeSpells = tomeSpells
 
     def getOurWitch(self) -> Witch:
         return self.witches[0]
@@ -277,27 +287,25 @@ class GameState(StringRepresenter):
 
 
 def parseInput() -> GameState:
-    clientOrders, ourSpells, theirSpells, mainInputLines = parseClientOrdersOurSpellsTheirSpells()
+    clientOrders, ourSpells, theirSpells, tomeSpells, mainInputLines = parseClientOrdersOurSpellsTheirSpellsTomeSpells()
     witches, witchInputLines = parseWitches(ourSpells, theirSpells)
     mainInputLines.extend(witchInputLines)
     # Uncomment this to print the game input (useful to record test cases)
     # print(mainInputLines)
-    return GameState(witches, clientOrders)
+    return GameState(witches, clientOrders, tomeSpells)
 
 
-def parseClientOrdersOurSpellsTheirSpells() -> [ClientOrder]:
+def parseClientOrdersOurSpellsTheirSpellsTomeSpells() -> [ClientOrder]:
     clientOrders = []
     ourSpells = []
     theirSpells = []
+    tomeSpells = []
     inputLines = []
     curLine = input()
     inputLines.append(curLine)
     action_count = int(curLine)  # the number of spells and recipes in play
+
     for i in range(action_count):
-        # tome_index: in the first two leagues: always 0; later: the index in the tome if this is a tome spell, equal to the read-ahead tax; For brews, this is the value of the current urgency bonus
-        # tax_count: in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell; For brews, this is how many times you can still gain an urgency bonus
-        # castable: in the first league: always 0; later: 1 if this is a castable player spell
-        # repeatable: for the first two leagues: always 0; later: 1 if this is a repeatable player spell
         curLine = input()
         inputLines.append(curLine)
         action_id, action_type, delta_0, delta_1, delta_2, delta_3, price, tome_index, tax_count, castable, repeatable = curLine.split()
@@ -305,7 +313,7 @@ def parseClientOrdersOurSpellsTheirSpells() -> [ClientOrder]:
         action_type = ActionType[action_type]
         if action_type is ActionType.BREW:
             clientOrders.append(
-                ClientOrder(action_id, abs(int(delta_0)), abs(int(delta_1)), abs(int(delta_2)), abs(int(delta_3)), abs(int(price)))
+                ClientOrder(action_id, abs(int(delta_0)), abs(int(delta_1)), abs(int(delta_2)), abs(int(delta_3)), abs(int(price)), int(tome_index))
             )
         elif action_type is ActionType.CAST:
             ourSpells.append(
@@ -315,13 +323,14 @@ def parseClientOrdersOurSpellsTheirSpells() -> [ClientOrder]:
             theirSpells.append(
                 Spell(action_id, int(delta_0), int(delta_1), int(delta_2), int(delta_3), int(castable))
             )
+        elif action_type is ActionType.LEARN:
+            tomeSpells.append(
+                TomeSpell(action_id, tome_index, int(delta_0), int(delta_1), int(delta_2), int(delta_3), tax_count)
+            )
         else:
             raise ValueError(f"Unknown action type {action_type}")
-        # tome_index = int(tome_index)
-        # tax_count = int(tax_count)
-        # castable = castable != "0"
-        # repeatable = repeatable != "0"
-    return clientOrders, ourSpells, theirSpells, inputLines
+
+    return clientOrders, ourSpells, theirSpells, tomeSpells, inputLines
 
 
 def parseWitches(ourSpells: [Spell], theirSpells: [Spell]):
@@ -350,12 +359,6 @@ def parseWitches(ourSpells: [Spell], theirSpells: [Spell]):
 ######## Util #######
 #####################
 
-tierNumToTier = { tier.value: tier for tier in IngredientTier }
-def getIngredientTierForNum(tierNum: int) -> IngredientTier:
-    # No key checks here, we assume it is a valid key
-    return tierNumToTier[tierNum]
-
-
 def logDebug(msg: str):
     print(msg, file=sys.stderr, flush=True)
 
@@ -370,6 +373,7 @@ def findShortestActionPath(actionPaths: [ActionPath]) -> Optional[ActionPath]:
         logDebug("Couldn't find any possible action path")
         return None
     return min(actionPaths, key=lambda path: len(path.getActions()))
+
 
 def runAlgo(gameState: GameState):
     ourWitch = gameState.getOurWitch()
