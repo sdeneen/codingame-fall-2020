@@ -1,7 +1,8 @@
 # To debug: print("Debug messages...", file=sys.stderr, flush=True)
 # Write an action using print
 # in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-from typing import Optional, Set, Dict
+import sys
+from typing import Optional, List, Dict
 from enum import Enum
 from collections import deque
 from copy import deepcopy
@@ -46,10 +47,10 @@ class Ingredients(StringRepresenter):
         return self.__tierQuantities.get(tier, 0)
 
     def getPositiveTiers(self):
-        return set([tier for tier in self.__tierQuantities if self.getQuantity(tier) > 0])
+        return [tier for tier in self.__tierQuantities if self.getQuantity(tier) > 0]
 
     def getNegativeTiers(self):
-        return set([tier for tier in self.__tierQuantities if self.getQuantity(tier) < 0])
+        return [tier for tier in self.__tierQuantities if self.getQuantity(tier) < 0]
 
     # Return a new ingredients object that only includes the tiers with negative quantities
     def getNegativeQuantities(self) -> 'Ingredients':
@@ -64,14 +65,6 @@ class Ingredients(StringRepresenter):
             tier: self.getQuantity(tier) for tier in self.__tierQuantities if self.getQuantity(tier) > 0
         }
         return Ingredients(newTiers)
-
-    def findLowestTierWithNegativeQuantity(self) -> Optional[IngredientTier]:
-        sortedIngredientTiers = list(IngredientTier)
-        for tier in sortedIngredientTiers:
-            if self.getQuantity(tier) < 0:
-                return tier
-
-        return None
 
     def hasNoNegativeQuantities(self):
         return len(self.getNegativeTiers()) == 0
@@ -138,8 +131,8 @@ class Spell(StringRepresenter):
         self.ingredients = Ingredients.fromTierArgs(tier0, tier1, tier2, tier3)
         self.castable = castable != 0
 
-    def createsAny(self, ingredientTiers: Set[IngredientTier]) -> bool:
-        tiersCreated = self.ingredients.getPositiveTiers()
+    def createsAny(self, ingredientTiers: List[IngredientTier]) -> bool:
+        tiersCreated = set(self.ingredients.getPositiveTiers())
         return len(tiersCreated.intersection(ingredientTiers)) > 0
 
     def getActionToCast(self) -> str:
@@ -183,13 +176,12 @@ class Witch(StringRepresenter):
         return True
 
 
-    # This looks up possible action paths to get a single ingredient tier, searching a tree from the root where the final action leads to the root, and the first action for each action path is a link to a leaf node
-    # TODO (sd): this function mostly already handles action paths to achieving a desired inventory, so maybe change the contract so it takes in a target inventory rather than a single ingredient tier
-    def actionsToGetIngredient(self, startingInventory, desiredTier: IngredientTier) -> [ActionPath]:
+    # This looks up possible action paths to get missing ingredients, searching a tree from the root where the final action leads to the root, and the first action for each action path is a link to a leaf node
+    def actionsToGetMissingIngredients(self, startingInventory: Inventory, missingIngredients: Ingredients) -> [ActionPath]:
         actionsPathsResult = []
         spellsById = self.spellsById
         stack = deque()
-        rootNode = SpellTraversalNode(Ingredients({desiredTier: -1}), {}, startingInventory, [])
+        rootNode = SpellTraversalNode(missingIngredients, {}, startingInventory, [])
         stack.append(rootNode)
         while len(stack) > 0:
             curNode: SpellTraversalNode = stack.pop()
@@ -251,19 +243,18 @@ class Witch(StringRepresenter):
 
     # Right now this just picks the shortest action path to get the highest tier missing ingredient
     # Needs a real algo that looks at all missing ingredients to figure out in what order to fulfill them (ideally optimizing rests)
-    def actionsToGetInventory(self, desiredInventory: Inventory) -> ActionPath:
+    def actionsToGetInventory(self, desiredInventory: Inventory) -> Optional[ActionPath]:
         ingredientsDiff = self.inventory.ingredients.diff(desiredInventory.ingredients)
         remainingInventory = Inventory(ingredientsDiff.getPositiveQuantities())
         missingIngredients = ingredientsDiff.getNegativeQuantities()
-        # At some point, could experiment with aiming for the highest tier first if we wanted. Starting low showed marginally better test results on a few test cases
-        desiredTier = missingIngredients.findLowestTierWithNegativeQuantity()
 
-        if desiredTier is not None:
-            possibleActionPaths = self.actionsToGetIngredient(remainingInventory, desiredTier)
-            chosenActionPath = findShortestActionPath(possibleActionPaths)
-            return chosenActionPath
+        if missingIngredients.hasNoNegativeQuantities():
+            return ActionPath([], remainingInventory)
 
-        return ActionPath([], remainingInventory)
+        possibleActionPaths = self.actionsToGetMissingIngredients(remainingInventory, missingIngredients)
+        chosenActionPath = findShortestActionPath(possibleActionPaths)
+        return chosenActionPath
+
 
 
 
@@ -365,13 +356,19 @@ def getIngredientTierForNum(tierNum: int) -> IngredientTier:
     return tierNumToTier[tierNum]
 
 
+def logDebug(msg: str):
+    print(msg, file=sys.stderr, flush=True)
+
 
 #####################
 ######## Algo #######
 #####################
 
 
-def findShortestActionPath(actionPaths: [ActionPath]) -> ActionPath:
+def findShortestActionPath(actionPaths: [ActionPath]) -> Optional[ActionPath]:
+    if len(actionPaths) == 0:
+        logDebug("Couldn't find any possible action path")
+        return None
     return min(actionPaths, key=lambda path: len(path.getActions()))
 
 def runAlgo(gameState: GameState):
@@ -379,7 +376,10 @@ def runAlgo(gameState: GameState):
     sortedOrders = gameState.getOrdersSortedByPriceDesc()
     order = sortedOrders[-1]
     actionPath = ourWitch.actionsToGetInventory(Inventory(order.ingredients))
-    if len(actionPath.getActions()) == 0:
+    if actionPath is None:
+        # Shouldn't happen? Hopefully
+        print(ActionType.REST.value)
+    elif len(actionPath.getActions()) == 0:
         print(order.getBrewAction())
     else:
         print(actionPath.getActions()[0])
