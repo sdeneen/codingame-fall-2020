@@ -250,7 +250,6 @@ class Witch(StringRepresenter):
                 actionsToAdd.append(spell.getActionToCast())
                 updatedActionsSoFar = curNode.getActionsSoFar() + actionsToAdd
 
-                # todo (algo++): if 75% close to target, validAction
                 if resultingInventoryAfterSpellCast.has(
                         targetInventory,
                         targetPercentage=HAS_INGREDIENTS_TARGET_PERCENTAGE
