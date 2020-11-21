@@ -200,6 +200,7 @@ class Witch(StringRepresenter):
             ingredientsToLookFor = curMissingIngredients.getNegativeTiers()
 
             # Find spells that could generate any of the missing ingredients
+            # Do NOT modify any of the above variables in this for loop. Each spell has to result in its own independent state
             for spell in spellsById.values():
                 if spell.createsAny(ingredientsToLookFor):
                     # This is a valid spell we could use, compute what would happen if we used it and add to the action path
@@ -210,12 +211,13 @@ class Witch(StringRepresenter):
                     newActions.append(spellActionToTake)
                     # Track the casting of this spell in our spell cast counter dictionary by incrementing this spell's cast count by 1
                     futureCastsRequiredForCurSpell = numSpellCastsRequiredBeforeNextRest.get(spell.spellId, 0)
-                    numSpellCastsRequiredBeforeNextRest[spell.spellId] = futureCastsRequiredForCurSpell + 1
+                    newNumSpellCastsRequiredBeforeNextRest = deepcopy(numSpellCastsRequiredBeforeNextRest)
+                    newNumSpellCastsRequiredBeforeNextRest[spell.spellId] = futureCastsRequiredForCurSpell + 1
 
                     # Check if we need to rest after casting this spell so we can cast it again later
-                    if futureCastsRequiredForCurSpell > 1:
+                    if futureCastsRequiredForCurSpell >= 1:
                         newActions.append(ActionType.REST.value)
-                        numSpellCastsRequiredBeforeNextRest = {
+                        newNumSpellCastsRequiredBeforeNextRest = {
                             spell.spellId: 1
                         }
 
@@ -232,8 +234,8 @@ class Witch(StringRepresenter):
                     # Finalize the action path
                     if resultingIngredients.hasNoNegativeQuantities():
                         # Handle rests for spells that start as uncastable to make sure we can use them
-                        for spellId in numSpellCastsRequiredBeforeNextRest:
-                            if numSpellCastsRequiredBeforeNextRest[spellId] > 0 and not spellsById[spellId].castable:
+                        for spellId in newNumSpellCastsRequiredBeforeNextRest:
+                            if newNumSpellCastsRequiredBeforeNextRest[spellId] > 0 and not spellsById[spellId].castable:
                                 latestActionList.append(ActionType.REST.value)
                                 break
                         latestActionList.reverse()   # need to reverse this to be in chronological order since we create the action paths backwards
@@ -241,7 +243,7 @@ class Witch(StringRepresenter):
                         actionsPathsResult.append(actionPath)
                     else:
                         # We need more ingredients, let's add a new node to the stack and keep going
-                        newNode = SpellTraversalNode(newMissingIngredients, numSpellCastsRequiredBeforeNextRest, remainingInventory, latestActionList)
+                        newNode = SpellTraversalNode(newMissingIngredients, newNumSpellCastsRequiredBeforeNextRest, remainingInventory, latestActionList)
                         stack.append(newNode)
 
 
