@@ -7,7 +7,17 @@ from enum import Enum
 from collections import deque, Counter
 from copy import deepcopy
 
+
+#####################
+##### Constants #####
+#####################
 MAX_INVENTORY_SIZE = 10
+
+#####################
+###### Toggles ######
+#####################
+HAS_INGREDIENTS_TARGET_PERCENTAGE = 0.75
+MAX_VALID_PATHS = 10
 
 #####################
 ###### Classes ######
@@ -106,7 +116,6 @@ class Ingredients(StringRepresenter):
 
     def has(self, ingredients: 'Ingredients', targetPercentage: float = 1.0) -> bool:
         assert ingredients.hasNoNegativeQuantities()
-        # TODO (mv): tier based missing %
         # have = [1, 0, 0, 1]
         # need = [1, 0, 1, 1] => score = targetTierWeight
         # missing = [0, 0, 1, 0] => score = missingTierWeight
@@ -117,7 +126,6 @@ class Ingredients(StringRepresenter):
         percentageMissing = 0 if targetTierWeight == 0 else missingTierWeight / targetTierWeight
 
         return 1 - percentageMissing >= targetPercentage
-        # return self.subtract(ingredients).hasNoNegativeQuantities()
 
     @staticmethod
     def fromTierArgs(*tiers):
@@ -243,12 +251,15 @@ class Witch(StringRepresenter):
                 updatedActionsSoFar = curNode.getActionsSoFar() + actionsToAdd
 
                 # todo (algo++): if 75% close to target, validAction
-                if resultingInventoryAfterSpellCast.has(targetInventory, targetPercentage=0.80) or tookRest:
+                if resultingInventoryAfterSpellCast.has(
+                        targetInventory,
+                        targetPercentage=HAS_INGREDIENTS_TARGET_PERCENTAGE
+                ) or tookRest:
                     # Leaf node, finalize action path
                     logDebug(f"Action path: {updatedActionsSoFar}")
                     validActionPath = ActionPath(updatedActionsSoFar, resultingInventoryAfterSpellCast)
                     validActionPaths.append(validActionPath)
-                    if len(validActionPaths) > 10:
+                    if len(validActionPaths) == MAX_VALID_PATHS:
                         return validActionPaths
                 else:
                     if shouldContinueTraversal(updatedActionsSoFar):
@@ -257,15 +268,12 @@ class Witch(StringRepresenter):
         return validActionPaths
 
 
-
     # Right now this just picks the shortest action path to get the highest tier missing ingredient
     # todo (algo++): Needs a real algo that looks at all missing ingredients to figure out in
     #                what order to fulfill them (ideally optimizing rests)
     def actionsToGetInventory(self, desiredInventory: Ingredients) -> Optional[ActionPath]:
         possibleActionPaths = self.actionsToGetTargetInventory(self.inventory, desiredInventory)
         # logDebug("\n".join([str(a) for a in possibleActionPaths]))
-        # return findHighestWeightedResultingInventory(findShortestActionPaths(possibleActionPaths))
-        # return findShortestActionPath(possibleActionPaths)
         return findMostCommonFirstAction(possibleActionPaths)
 
 
@@ -341,8 +349,6 @@ def parseWitches(ourSpells: [Spell], theirSpells: [Spell]):
     for i in range(2):
         curLine = input()
         inputLines.append(curLine)
-        # inv_0: tier-0 ingredients in inventory
-        # score: amount of rupees
         inv_0, inv_1, inv_2, inv_3, rupees = [int(j) for j in curLine.split()]
         ingredients = Ingredients.fromTierArgs(inv_0, inv_1, inv_2, inv_3)
         witches.append(
@@ -395,12 +401,7 @@ def getBestSpells(spells: [Spell], curInventory: Ingredients, targetInventory: I
 
 
 def shouldContinueTraversal(actionsSoFar: [str]) -> bool:
-    # TODO (algo++): trim if it has too many REST
-        # REST, CAST, REST, CAST, REST
-        # count based?
-        # %?
-    numRests = actionsSoFar.count(ActionType.REST.value)
-    return len(actionsSoFar) <= 15 and numRests <= 2
+    return len(actionsSoFar) <= 15
 
 
 def findShortestActionPath(actionPaths: [ActionPath]) -> Optional[ActionPath]:
