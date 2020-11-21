@@ -412,12 +412,12 @@ def runAlgo(gameState: GameState):
 
     ourWitch = gameState.getOurWitch()
     sortedOrders = gameState.getOrdersSortedByPriceDesc()
-    highestPricedOrder = sortedOrders[-1]
+    lowestPricedOrder = sortedOrders[-1]  # we're assuming lowest price order is the fastest order to make
 
-    if ourWitch.hasIngredientsForOrder(highestPricedOrder):
-        print(highestPricedOrder.getBrewAction())
+    if ourWitch.hasIngredientsForOrder(lowestPricedOrder):
+        print(lowestPricedOrder.getBrewAction())
     else:
-        actionPath = ourWitch.actionsToGetInventory(highestPricedOrder.ingredients)
+        actionPath = ourWitch.actionsToGetInventory(lowestPricedOrder.ingredients)
         if actionPath is None:
             # Shouldn't happen? Hopefully
             logDebug("Ay dios mio. No action path found!!")
