@@ -17,7 +17,7 @@ MAX_INVENTORY_SIZE = 10
 ###### Toggles ######
 #####################
 HAS_INGREDIENTS_TARGET_PERCENTAGE = 0.75
-MAX_VALID_PATHS = 10
+MAX_VALID_PATHS = 15
 
 #####################
 ###### Classes ######
@@ -434,6 +434,13 @@ def findShortestActionPaths(actionPaths: [ActionPath]) -> [ActionPath]:
     return [a for a in actionPaths if len(a.getActions()) == shortestPathLength]
 
 
+def chooseOrder(orders: [ClientOrder], currentInventory: Ingredients) -> ClientOrder:
+    def calculateMissingIngredientsWeight(order: ClientOrder, currentInventory: Ingredients):
+        return currentInventory.subtract(order.ingredients).getNegativeQuantities(True).getPositiveTiersWeight()
+
+    return min(orders, key=lambda order: calculateMissingIngredientsWeight(order, currentInventory))
+
+
 def runAlgo(gameState: GameState):
     learnSpellMaybe = testTomeAlgo(gameState)
     if learnSpellMaybe is not None:
@@ -441,26 +448,25 @@ def runAlgo(gameState: GameState):
         return print(learnSpellMaybe)
 
     ourWitch = gameState.getOurWitch()
-    sortedOrdersPriceDesc = gameState.getOrdersSortedByPriceDesc()
     # TODO (algo++): actually look up the fastest order by tier weight rather than assuming the lowest priced order is the fastest
-    lowestPricedOrder = sortedOrdersPriceDesc[-1]
+    chosenOrder = chooseOrder(gameState.clientOrders, ourWitch.inventory)
 
-    if ourWitch.hasIngredientsForOrder(lowestPricedOrder):
-        print(lowestPricedOrder.getBrewAction())
+    if ourWitch.hasIngredientsForOrder(chosenOrder):
+        print(chosenOrder.getBrewAction())
     else:
         # Testing if we can run the algo on each order to pick the best order
         # for o in sortedOrdersPriceDesc[0]:
         #     if not ourWitch.hasIngredientsForOrder(o):
         #         logDebug(ourWitch.actionsToGetInventory(o.ingredients))
 
-        actionPath = ourWitch.actionsToGetInventory(lowestPricedOrder.ingredients)
+        actionPath = ourWitch.actionsToGetInventory(chosenOrder.ingredients)
         if actionPath is None:
             # Shouldn't happen? Hopefully
             logDebug("Ay dios mio. No action path found!!")
             print(ActionType.REST.value)
         else:
             logDebug(f"Chose action path with length {len(actionPath.getActions())}: {actionPath}")
-            logDebug(f"Going for order={lowestPricedOrder}")
+            logDebug(f"Going for order={chosenOrder}")
             print(actionPath.getActions()[0])
 
 
