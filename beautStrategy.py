@@ -1,13 +1,11 @@
 # To debug: print("Debug messages...", file=sys.stderr, flush=True)
 # Write an action using print
 # in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-import math
 import sys
 from typing import Optional, List, Dict
 from enum import Enum
-from collections import deque
+from collections import deque, Counter
 from copy import deepcopy
-
 
 MAX_INVENTORY_SIZE = 10
 
@@ -118,7 +116,7 @@ class Ingredients(StringRepresenter):
         missingTierWeight = missingIngredients.getPositiveTiersWeight()
         percentageMissing = 0 if targetTierWeight == 0 else missingTierWeight / targetTierWeight
 
-        return math.isclose(1 - percentageMissing, targetPercentage)
+        return 1 - percentageMissing >= targetPercentage
         # return self.subtract(ingredients).hasNoNegativeQuantities()
 
     @staticmethod
@@ -232,8 +230,10 @@ class Witch(StringRepresenter):
                 updatedLearnedSpells = deepcopy(curNode.getLearnedSpellsById())
                 resultingInventoryAfterSpellCast = curNode.getCurInventory().merge(spell.ingredients)
 
+                tookRest = False
                 if not spell.castable:
                     # Take a REST
+                    tookRest = True
                     actionsToAdd.append(ActionType.REST.value)
                     updatedLearnedSpells = refreshSpells(curNode.getLearnedSpellsById())
 
@@ -243,10 +243,13 @@ class Witch(StringRepresenter):
                 updatedActionsSoFar = curNode.getActionsSoFar() + actionsToAdd
 
                 # todo (algo++): if 75% close to target, validAction
-                if resultingInventoryAfterSpellCast.has(targetInventory, targetPercentage=0.50):
+                if resultingInventoryAfterSpellCast.has(targetInventory, targetPercentage=0.80) or tookRest:
                     # Leaf node, finalize action path
+                    logDebug(f"Action path: {updatedActionsSoFar}")
                     validActionPath = ActionPath(updatedActionsSoFar, resultingInventoryAfterSpellCast)
                     validActionPaths.append(validActionPath)
+                    if len(validActionPaths) > 10:
+                        return validActionPaths
                 else:
                     if shouldContinueTraversal(updatedActionsSoFar):
                         stack.append(SpellTraversalNode(resultingInventoryAfterSpellCast, updatedLearnedSpells, updatedActionsSoFar))
@@ -261,8 +264,9 @@ class Witch(StringRepresenter):
     def actionsToGetInventory(self, desiredInventory: Ingredients) -> Optional[ActionPath]:
         possibleActionPaths = self.actionsToGetTargetInventory(self.inventory, desiredInventory)
         # logDebug("\n".join([str(a) for a in possibleActionPaths]))
-        #chosenActionPath = findHighestWeightedResultingInventory(findShortestActionPaths(possibleActionPaths))
-        return findShortestActionPath(possibleActionPaths)
+        # return findHighestWeightedResultingInventory(findShortestActionPaths(possibleActionPaths))
+        # return findShortestActionPath(possibleActionPaths)
+        return findMostCommonFirstAction(possibleActionPaths)
 
 
 class GameState(StringRepresenter):
@@ -395,7 +399,6 @@ def shouldContinueTraversal(actionsSoFar: [str]) -> bool:
         # REST, CAST, REST, CAST, REST
         # count based?
         # %?
-    logDebug(f"Actions so far: {actionsSoFar}")
     numRests = actionsSoFar.count(ActionType.REST.value)
     return len(actionsSoFar) <= 15 and numRests <= 2
 
@@ -414,6 +417,14 @@ def findHighestWeightedResultingInventory(actionPaths: [ActionPath]) -> Optional
     return max(actionPaths, key=lambda p: p.getResultingInventory().getPositiveTiersWeight())
 
 
+def findMostCommonFirstAction(actionPaths: [ActionPath]) -> Optional[ActionPath]:
+    firstActions = [a.getActions()[0] for a in actionPaths]
+    firstActionCounts = Counter(firstActions)
+    logDebug(str(firstActionCounts))
+    mostCommonFirstAction = max(firstActionCounts, key=firstActionCounts.get)
+    return ActionPath([mostCommonFirstAction], None)
+
+
 def findShortestActionPaths(actionPaths: [ActionPath]) -> [ActionPath]:
     if len(actionPaths) == 0:
         logDebug("Couldn't find any possible action path")
@@ -429,13 +440,18 @@ def runAlgo(gameState: GameState):
         return print(learnSpellMaybe)
 
     ourWitch = gameState.getOurWitch()
-    sortedOrders = gameState.getOrdersSortedByPriceDesc()
-    # TODO (algo++): actually look up the fastest order rather than assuming the lowest priced order is the fastest
-    lowestPricedOrder = sortedOrders[-1]  # we're assuming lowest price order is the fastest order to make
+    sortedOrdersPriceDesc = gameState.getOrdersSortedByPriceDesc()
+    # TODO (algo++): actually look up the fastest order by tier weight rather than assuming the lowest priced order is the fastest
+    lowestPricedOrder = sortedOrdersPriceDesc[-1]
 
     if ourWitch.hasIngredientsForOrder(lowestPricedOrder):
         print(lowestPricedOrder.getBrewAction())
     else:
+        # Testing if we can run the algo on each order to pick the best order
+        # for o in sortedOrdersPriceDesc[0]:
+        #     if not ourWitch.hasIngredientsForOrder(o):
+        #         logDebug(ourWitch.actionsToGetInventory(o.ingredients))
+
         actionPath = ourWitch.actionsToGetInventory(lowestPricedOrder.ingredients)
         if actionPath is None:
             # Shouldn't happen? Hopefully
