@@ -278,7 +278,7 @@ class Witch(StringRepresenter):
 
         possibleActionPaths = self.actionsToGetMissingIngredients(remainingIngredients, missingIngredients)
         logDebug("\n".join([str(a) for a in possibleActionPaths]))
-        chosenActionPath = findHighestQuantityResultingInventory(findShortestActionPaths(possibleActionPaths))
+        chosenActionPath = findHighestWeightedResultingInventory(findShortestActionPaths(possibleActionPaths))
         return chosenActionPath
 
 
@@ -389,7 +389,7 @@ def findShortestActionPath(actionPaths: [ActionPath]) -> Optional[ActionPath]:
     return min(actionPaths, key=lambda path: len(path.getActions()))
 
 
-def findHighestQuantityResultingInventory(actionPaths: [ActionPath]) -> Optional[ActionPath]:
+def findHighestWeightedResultingInventory(actionPaths: [ActionPath]) -> Optional[ActionPath]:
     if len(actionPaths) == 0:
         logDebug("Couldn't find any possible action path")
         return None
