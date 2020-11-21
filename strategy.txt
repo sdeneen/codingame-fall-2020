@@ -43,3 +43,10 @@ TODO
 	* Spell casting should compare spells to ensure best pick
 		* E.g Spell(4, 0, 0, 0) vs Spell(2, 0, 0, 0)
 		* E.g. we don't cause overflow
+
+
+
+
+Avoiding timeouts:
+    * Try using a queue instead of stack for BFS and shortcircuiting after processing the first layer of nodes that results in an action path
+    * Limit best spells to top N (2 or 3?), based off weight of missing ingredients after simulating spell cast (can break ties on inventory total weight)

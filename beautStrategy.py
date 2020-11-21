@@ -1,8 +1,9 @@
 # To debug: print("Debug messages...", file=sys.stderr, flush=True)
 # Write an action using print
 # in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-import math
+import datetime
 import sys
+from functools import cmp_to_key
 from typing import Optional, List, Dict
 from enum import Enum
 from collections import deque
@@ -53,7 +54,12 @@ class Ingredients(StringRepresenter):
 
     # Test algo
     def getPositiveTiersWeight(self) -> int:
-        return sum([self.getQuantity(tier) * (tier.value + 1) for tier in self.__tierQuantities if self.getQuantity(tier) > 0])
+        # Tier 0 = 0.5 actions  (starting spell is 2 tier zeros for free)
+        # Tier 1 = 1.5 actions  (starting spell is 1 tier zero for 1 tier one)
+        # Tier 2 = 2.5 actions  (starting spell is 1 tier one for 1 tier two)
+        # Tier 3 = 3.5 actions  (starting spell is 1 tier two for 1 tier three)
+        # So the weight for each tier is tier value plus 0.5
+        return sum([self.getQuantity(tier) * (tier.value + 0.5) for tier in self.__tierQuantities if self.getQuantity(tier) > 0])
 
     # Test algo
     def getPositiveTiersTotalQuantity(self) -> int:
@@ -118,7 +124,7 @@ class Ingredients(StringRepresenter):
         missingTierWeight = missingIngredients.getPositiveTiersWeight()
         percentageMissing = 0 if targetTierWeight == 0 else missingTierWeight / targetTierWeight
 
-        return math.isclose(1 - percentageMissing, targetPercentage)
+        return 1 - percentageMissing >= targetPercentage
         # return self.subtract(ingredients).hasNoNegativeQuantities()
 
     @staticmethod
@@ -226,8 +232,9 @@ class Witch(StringRepresenter):
         stack.append(rootNode)
         while len(stack) > 0:
             # logDebug(f"stack length: {len(stack)}")
-            curNode: SpellTraversalNode = stack.pop()
-            for spell in getBestSpells(curNode.getLearnedSpellsById().values(), curNode.getCurInventory(), targetInventory):
+            curNode: SpellTraversalNode = stack.popleft()
+            bestSpells = getBestSpells(curNode.getLearnedSpellsById(), curNode.getCurInventory(), targetInventory)
+            for spell in bestSpells:
                 actionsToAdd = []
                 updatedLearnedSpells = deepcopy(curNode.getLearnedSpellsById())
                 resultingInventoryAfterSpellCast = curNode.getCurInventory().merge(spell.ingredients)
@@ -243,12 +250,12 @@ class Witch(StringRepresenter):
                 updatedActionsSoFar = curNode.getActionsSoFar() + actionsToAdd
 
                 # todo (algo++): if 75% close to target, validAction
-                if resultingInventoryAfterSpellCast.has(targetInventory, targetPercentage=0.50):
+                if resultingInventoryAfterSpellCast.has(targetInventory):
                     # Leaf node, finalize action path
                     validActionPath = ActionPath(updatedActionsSoFar, resultingInventoryAfterSpellCast)
                     validActionPaths.append(validActionPath)
                 else:
-                    if shouldContinueTraversal(updatedActionsSoFar):
+                    if len(validActionPaths) == 0 and shouldContinueTraversal(updatedActionsSoFar):
                         stack.append(SpellTraversalNode(resultingInventoryAfterSpellCast, updatedLearnedSpells, updatedActionsSoFar))
 
         return validActionPaths
@@ -375,19 +382,55 @@ def refreshSpells(spells: Dict[str, Spell]):
 ######## Algo #######
 #####################
 
-def getBestSpells(spells: [Spell], curInventory: Ingredients, targetInventory: Ingredients):
-    bestSpells = []
-    for spell in spells:
+def getBestSpells(spells: Dict[str, Spell], curInventory: Ingredients, targetInventory: Ingredients) -> [Spell]:
+    MAX_BEST_SPELLS_TO_CONSIDER = 2
+    spellIdToResultingMissingIngredientsWeight = {}
+    spellIdToResultingInventoryWeight = {}
+    spellsToSort = []
+    for spell in spells.values():
         if curInventory.has(spell.ingredients.getNegativeQuantities(True)):  # cur inventory has ingredients to cast spell
             resultingInventoryAfterSpellCast = curInventory.merge(spell.ingredients)
             if resultingInventoryAfterSpellCast.getPositiveTiersTotalQuantity() > MAX_INVENTORY_SIZE:
                 logDebug(f"Considered casting a spell that would overflow our inventory.")
                 continue
-            missingTiersForTargetInventory = curInventory.subtract(targetInventory).getNegativeTiers()
-            if spell.createsAny(missingTiersForTargetInventory) or spell.createsAny(curInventory.getMissingTiers()):
-                bestSpells.append(spell)
 
-    return bestSpells
+            missingIngredientsAfterSpellCast = resultingInventoryAfterSpellCast.subtract(targetInventory).getNegativeQuantities(True)
+            spellIdToResultingMissingIngredientsWeight[spell.spellId] = missingIngredientsAfterSpellCast.getPositiveTiersWeight()
+            spellIdToResultingInventoryWeight[spell.spellId] = resultingInventoryAfterSpellCast.getPositiveTiersWeight()
+            spellsToSort.append(spell)
+
+
+    def compareSpells(firstSpell: Spell, secondSpell: Spell) -> int:
+        firstSpellMissingIngredientsWeight = spellIdToResultingMissingIngredientsWeight[firstSpell.spellId]
+        secondSpellMissingIngredientsWeight = spellIdToResultingMissingIngredientsWeight[secondSpell.spellId]
+
+        # Prioritize lowest missing ingredients weight first
+        if firstSpellMissingIngredientsWeight < secondSpellMissingIngredientsWeight:
+            return -1
+        elif firstSpellMissingIngredientsWeight > secondSpellMissingIngredientsWeight:
+            return 1
+        else:
+            # Then prioritize highest resulting inventory weight
+            firstSpellResultingInventoryWeight = spellIdToResultingInventoryWeight[firstSpell.spellId]
+            secondSpellResultingInventoryWeight = spellIdToResultingInventoryWeight[secondSpell.spellId]
+            if firstSpellResultingInventoryWeight < secondSpellResultingInventoryWeight:
+                return 1
+            elif firstSpellResultingInventoryWeight > secondSpellResultingInventoryWeight:
+                return -1
+            else:
+                return 0
+
+    spellsOrderedFromBestToWorst = sorted(spellsToSort, key=cmp_to_key(compareSpells))
+
+    if len(spellsOrderedFromBestToWorst) == 0:
+        return []
+
+    bestWeight = spellIdToResultingMissingIngredientsWeight[spellsOrderedFromBestToWorst[0].spellId]
+    spellsToConsider = list(filter(lambda s: spellIdToResultingMissingIngredientsWeight[s.spellId] == bestWeight, spellsOrderedFromBestToWorst))
+
+    # Limit to the top MAX_BEST_SPELLS_TO_CONSIDER spells
+    numSpellsToReturn = min(len(spellsToConsider), MAX_BEST_SPELLS_TO_CONSIDER)
+    return spellsToConsider[0:numSpellsToReturn]
 
 
 def shouldContinueTraversal(actionsSoFar: [str]) -> bool:
@@ -460,4 +503,8 @@ def testTomeAlgo(gameState: GameState) -> Optional[str]:
 
 
 while True:
+    startTime = datetime.datetime.now()
     runAlgo(parseInput())
+    endTime = datetime.datetime.now()
+    diff = endTime - startTime
+    logDebug(f"Took {diff.total_seconds()} seconds")
