@@ -2,6 +2,7 @@
 # Write an action using print
 # in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
 import sys
+from functools import cmp_to_key
 from typing import Optional, List, Dict
 from enum import Enum
 from collections import deque, Counter
@@ -17,7 +18,7 @@ MAX_INVENTORY_SIZE = 10
 ###### Toggles ######
 #####################
 HAS_INGREDIENTS_TARGET_PERCENTAGE = 0.75
-MAX_VALID_PATHS = 15
+MAX_VALID_PATHS = 10
 
 #####################
 ###### Classes ######
@@ -179,6 +180,9 @@ class Spell(StringRepresenter):
             assert self.repeatable
         return f"{ActionType.CAST.value} {self.spellId} {times}"
 
+    def isFree(self) -> bool:
+        return self.ingredients.hasNoNegativeQuantities()
+
 
 class TomeSpell(StringRepresenter):
     def __init__(self, spellId, spellIndex, tier0, tier1, tier2, tier3, tier0Earned):
@@ -267,13 +271,10 @@ class Witch(StringRepresenter):
         return validActionPaths
 
 
-    # Right now this just picks the shortest action path to get the highest tier missing ingredient
-    # todo (algo++): Needs a real algo that looks at all missing ingredients to figure out in
-    #                what order to fulfill them (ideally optimizing rests)
     def actionsToGetInventory(self, desiredInventory: Ingredients) -> Optional[ActionPath]:
         possibleActionPaths = self.actionsToGetTargetInventory(self.inventory, desiredInventory)
         # logDebug("\n".join([str(a) for a in possibleActionPaths]))
-        return findMostCommonFirstAction(possibleActionPaths)
+        return findClosestToTargetInventory(possibleActionPaths, desiredInventory)
 
 
 class GameState(StringRepresenter):
@@ -333,7 +334,7 @@ def parseClientOrdersOurSpellsTheirSpellsTomeSpells() -> [ClientOrder]:
             )
         elif action_type is ActionType.LEARN:
             tomeSpells.append(
-                TomeSpell(action_id, int(tome_index), int(delta_0), int(delta_1), int(delta_2), int(delta_3), tax_count)
+                TomeSpell(action_id, int(tome_index), int(delta_0), int(delta_1), int(delta_2), int(delta_3), int(tax_count))
             )
         else:
             raise ValueError(f"Unknown action type {action_type}")
@@ -417,6 +418,13 @@ def findHighestWeightedResultingInventory(actionPaths: [ActionPath]) -> Optional
     return max(actionPaths, key=lambda p: p.getResultingInventory().getPositiveTiersWeight())
 
 
+def findClosestToTargetInventory(actionPaths: [ActionPath], targetInventory: Ingredients) -> Optional[ActionPath]:
+    def calculateMissingIngredientsWeight(resultingInventoryForActionPath: Ingredients, targetInventory: Ingredients):
+        return resultingInventoryForActionPath.subtract(targetInventory).getNegativeQuantities(True).getPositiveTiersWeight()
+
+    return min(actionPaths, key=lambda actionPath: calculateMissingIngredientsWeight(actionPath.getResultingInventory(), targetInventory))
+
+
 def findMostCommonFirstAction(actionPaths: [ActionPath]) -> Optional[ActionPath]:
     firstActions = [a.getActions()[0] for a in actionPaths]
     firstActionCounts = Counter(firstActions)
@@ -437,7 +445,10 @@ def chooseOrder(orders: [ClientOrder], currentInventory: Ingredients) -> ClientO
     def calculateMissingIngredientsWeight(order: ClientOrder, currentInventory: Ingredients):
         return currentInventory.subtract(order.ingredients).getNegativeQuantities(True).getPositiveTiersWeight()
 
-    return min(orders, key=lambda order: calculateMissingIngredientsWeight(order, currentInventory))
+    # TODO (mv): clean this code
+    lowestWeightedOrder = min(orders, key=lambda order: calculateMissingIngredientsWeight(order, currentInventory))
+    lowestWeight = calculateMissingIngredientsWeight(lowestWeightedOrder, currentInventory)
+    return max([o for o in orders if calculateMissingIngredientsWeight(o, currentInventory) == lowestWeight], key=lambda order: order.price)
 
 
 def runAlgo(gameState: GameState):
