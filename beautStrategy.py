@@ -2,7 +2,7 @@
 # Write an action using print
 # in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
 import sys
-from functools import cmp_to_key
+
 from typing import Optional, List, Dict
 from enum import Enum
 from collections import deque, Counter
