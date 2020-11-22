@@ -1,8 +1,6 @@
-# To debug: print("Debug messages...", file=sys.stderr, flush=True)
-# Write an action using print
-# in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
 import sys
 import random
+import time
 
 from typing import Optional, List, Dict
 from enum import Enum
@@ -19,8 +17,10 @@ SMACK_TALKS = ["Get got!", "Im gonna brew you something nice", "Whippin' it"]
 #####################
 ###### Toggles ######
 #####################
-HAS_INGREDIENTS_TARGET_PERCENTAGE = 0.75
-MAX_VALID_PATHS = 10
+HAS_INGREDIENTS_TARGET_PERCENTAGE = 0.85
+ACTION_PATH_DEDUPE_MAX_SIMILAR_ACTIONS = 2
+MAX_VALID_PATHS = 30
+TOME_SPELL_ORDER_MATCHING_TARGET_PERCENTAGE = 0.75
 
 #####################
 ###### Classes ######
@@ -62,11 +62,21 @@ class Ingredients(StringRepresenter):
     def getQuantity(self, tier: IngredientTier) -> int:
         return self.__tierQuantities.get(tier, 0)
 
-    # Test algo
     def getPositiveTiersWeight(self) -> int:
-        return sum([self.getQuantity(tier) * (tier.value + 1) for tier in self.__tierQuantities if self.getQuantity(tier) > 0])
+        # Calculated based off number of actions to get two of a single tier ingredient
+        # Tier 0 = 1 action     (starting spell is 2 tier zeros for free)
+        # Tier 1 = 4 actions    (1 action for 2 tier zeros, then use starting spell to convert 1 tier zero to 1 tier one, then REST, then repeat spell)
+        # Tier 2 = 7 actions    (4 actions for 2 tier ones, then use starting spell to convert 1 tier one to 1 tier two, then REST, then repeat spell)
+        # Tier 3 = 10 actions   (7 actions for 2 tier twos, then use starting spell to convert 1 tier two to 1 tier three, then REST, then repeat spell)
 
-    # Test algo
+        tierWeights = {
+            IngredientTier.TIER_0: 1,
+            IngredientTier.TIER_1: 4,
+            IngredientTier.TIER_2: 7,
+            IngredientTier.TIER_3: 10
+        }
+        return sum([self.getQuantity(tier) * tierWeights[tier] for tier in self.__tierQuantities if self.getQuantity(tier) > 0])
+
     def getPositiveTiersTotalQuantity(self) -> int:
         return sum([self.getQuantity(tier) for tier in self.__tierQuantities if self.getQuantity(tier) > 0])
 
@@ -130,6 +140,20 @@ class Ingredients(StringRepresenter):
 
         return 1 - percentageMissing >= targetPercentage
 
+    def equals(self, other: 'Ingredients') -> bool:
+        for tier in IngredientTier:
+            if self.getQuantity(tier) != other.getQuantity(tier):
+                return False
+
+        return True
+
+    def __eq__(self, other: 'Ingredients') -> bool:
+        for tier in IngredientTier:
+            if self.getQuantity(tier) != other.getQuantity(tier):
+                return False
+
+        return True
+
     @staticmethod
     def fromTierArgs(*tiers):
         i = 0
@@ -173,7 +197,6 @@ class Spell(StringRepresenter):
         self.repeatable = repeatable != 0
 
     def createsAny(self, ingredientTiers: List[IngredientTier]) -> bool:
-        # TODO (algo++): trim more possibilities by choosing the best creation
         tiersCreated = set(self.ingredients.getPositiveTiers())
         return len(tiersCreated.intersection(ingredientTiers)) > 0
 
@@ -235,11 +258,12 @@ class Witch(StringRepresenter):
 
         stack = deque()
         rootNode = SpellTraversalNode(startingInventory, self.spellsById, [])
+        # logDebug(f"starting inventory: {startingInventory}")
         stack.append(rootNode)
         while len(stack) > 0:
             # logDebug(f"stack length: {len(stack)}")
             curNode: SpellTraversalNode = stack.pop()
-            for spell in getBestSpells(curNode.getLearnedSpellsById().values(), curNode.getCurInventory(), targetInventory):
+            for spell in getBestSpells(curNode.getLearnedSpellsById(), curNode.getCurInventory(), targetInventory):
                 actionsToAdd = []
                 updatedLearnedSpells = deepcopy(curNode.getLearnedSpellsById())
                 resultingInventoryAfterSpellCast = curNode.getCurInventory().merge(spell.ingredients)
@@ -267,15 +291,14 @@ class Witch(StringRepresenter):
                     if len(validActionPaths) == MAX_VALID_PATHS:
                         return validActionPaths
                 else:
-                    if shouldContinueTraversal(updatedActionsSoFar):
+                    if shouldContinueTraversal(updatedActionsSoFar, validActionPaths):
                         stack.append(SpellTraversalNode(resultingInventoryAfterSpellCast, updatedLearnedSpells, updatedActionsSoFar))
 
         return validActionPaths
 
-
     def actionsToGetInventory(self, desiredInventory: Ingredients) -> Optional[ActionPath]:
         possibleActionPaths = self.actionsToGetTargetInventory(self.inventory, desiredInventory)
-        # logDebug("\n".join([str(a) for a in possibleActionPaths]))
+        # logDebug("Possible action paths: " + "\n--\\".join([str(a) for a in possibleActionPaths]))
         return findClosestToTargetInventory(possibleActionPaths, desiredInventory)
 
 
@@ -283,7 +306,7 @@ class GameState(StringRepresenter):
     def __init__(self, witches, clientOrders, tomeSpells):
         self.witches = witches
         self.clientOrders = clientOrders
-        self.tomeSpells = tomeSpells
+        self.tomeSpells: List[TomeSpell] = tomeSpells
 
     def getOurWitch(self) -> Witch:
         return self.witches[0]
@@ -383,27 +406,159 @@ def refreshSpells(spells: Dict[str, Spell]):
     }
 
 
+def timed(method):
+    def timeMethod(*args, **kw):
+        startTime = time.time()
+        result = method(*args, **kw)
+        endTime = time.time()
+        diff = endTime - startTime
+        logDebug(f"Took {diff * 1000:.2f} milliseconds")
+        return result
+    return timeMethod
+
 #####################
 ######## Algo #######
 #####################
 
-def getBestSpells(spells: [Spell], curInventory: Ingredients, targetInventory: Ingredients):
-    bestSpells = []
-    for spell in spells:
+
+ALL_ORDERS_COSTS = [
+    Ingredients.fromTierArgs(2, 2, 0, 0),
+    Ingredients.fromTierArgs(3, 2, 0, 0),
+    Ingredients.fromTierArgs(0, 4, 0, 0),
+    Ingredients.fromTierArgs(2, 0, 2, 0),
+    Ingredients.fromTierArgs(2, 3, 0, 0),
+    Ingredients.fromTierArgs(3, 0, 2, 0),
+    Ingredients.fromTierArgs(0, 2, 2, 0),
+    Ingredients.fromTierArgs(0, 5, 0, 0),
+    Ingredients.fromTierArgs(2, 0, 0, 2),
+    Ingredients.fromTierArgs(2, 0, 3, 0),
+    Ingredients.fromTierArgs(3, 0, 0, 2),
+    Ingredients.fromTierArgs(0, 0, 4, 0),
+    Ingredients.fromTierArgs(0, 2, 0, 2),
+    Ingredients.fromTierArgs(0, 3, 2, 0),
+    Ingredients.fromTierArgs(0, 2, 3, 0),
+    Ingredients.fromTierArgs(0, 0, 2, 2),
+    Ingredients.fromTierArgs(0, 3, 0, 2),
+    Ingredients.fromTierArgs(2, 0, 0, 3),
+    Ingredients.fromTierArgs(0, 0, 5, 0),
+    Ingredients.fromTierArgs(0, 0, 0, 4),
+    Ingredients.fromTierArgs(0, 2, 0, 3),
+    Ingredients.fromTierArgs(0, 0, 3, 2),
+    Ingredients.fromTierArgs(0, 0, 2, 3),
+    Ingredients.fromTierArgs(0, 0, 0, 5),
+    Ingredients.fromTierArgs(2, 1, 0, 1),
+    Ingredients.fromTierArgs(0, 2, 1, 1),
+    Ingredients.fromTierArgs(1, 0, 2, 1),
+    Ingredients.fromTierArgs(2, 2, 2, 0),
+    Ingredients.fromTierArgs(2, 2, 0, 2),
+    Ingredients.fromTierArgs(2, 0, 2, 2),
+    Ingredients.fromTierArgs(0, 2, 2, 2),
+    Ingredients.fromTierArgs(1, 1, 1, 1),
+    Ingredients.fromTierArgs(3, 1, 1, 1),
+    Ingredients.fromTierArgs(1, 3, 1, 1),
+    Ingredients.fromTierArgs(1, 1, 3, 1),
+    Ingredients.fromTierArgs(1, 1, 1, 3)
+]
+
+ALL_TOME_SPELLS_DELTAS = [
+    Ingredients.fromTierArgs(-3, 0, 0, 1),
+    Ingredients.fromTierArgs(3, -1, 0, 0),
+    Ingredients.fromTierArgs(1, 1, 0, 0),
+    Ingredients.fromTierArgs(0, 0, 1, 0),
+    Ingredients.fromTierArgs(3, 0, 0, 0),
+    Ingredients.fromTierArgs(2, 3, -2, 0),
+    Ingredients.fromTierArgs(2, 1, -2, 1),
+    Ingredients.fromTierArgs(3, 0, 1, -1),
+    Ingredients.fromTierArgs(3, -2, 1, 0),
+    Ingredients.fromTierArgs(2, -3, 2, 0),
+    Ingredients.fromTierArgs(2, 2, 0, -1),
+    Ingredients.fromTierArgs(-4, 0, 2, 0),
+    Ingredients.fromTierArgs(2, 1, 0, 0),
+    Ingredients.fromTierArgs(4, 0, 0, 0),
+    Ingredients.fromTierArgs(0, 0, 0, 1),
+    Ingredients.fromTierArgs(0, 2, 0, 0),
+    Ingredients.fromTierArgs(1, 0, 1, 0),
+    Ingredients.fromTierArgs(-2, 0, 1, 0),
+    Ingredients.fromTierArgs(-1, 0, -1, 1),
+    Ingredients.fromTierArgs(0, 2, -1, 0),
+    Ingredients.fromTierArgs(2, -2, 0, 1),
+    Ingredients.fromTierArgs(-3, 1, 1, 0),
+    Ingredients.fromTierArgs(0, 2, -2, 1),
+    Ingredients.fromTierArgs(1, -3, 1, 1),
+    Ingredients.fromTierArgs(0, 3, 0, -1),
+    Ingredients.fromTierArgs(0, -3, 0, 2),
+    Ingredients.fromTierArgs(1, 1, 1, -1),
+    Ingredients.fromTierArgs(1, 2, -1, 0),
+    Ingredients.fromTierArgs(4, 1, -1, 0),
+    Ingredients.fromTierArgs(-5, 0, 0, 2),
+    Ingredients.fromTierArgs(-4, 0, 1, 1),
+    Ingredients.fromTierArgs(0, 3, 2, -2),
+    Ingredients.fromTierArgs(1, 1, 3, -2),
+    Ingredients.fromTierArgs(-5, 0, 3, 0),
+    Ingredients.fromTierArgs(-2, 0, -1, 2),
+    Ingredients.fromTierArgs(0, 0, -3, 3),
+    Ingredients.fromTierArgs(0, -3, 3, 0),
+    Ingredients.fromTierArgs(-3, 3, 0, 0),
+    Ingredients.fromTierArgs(-2, 2, 0, 0),
+    Ingredients.fromTierArgs(0, 0, -2, 2),
+    Ingredients.fromTierArgs(0, -2, 2, 0),
+    Ingredients.fromTierArgs(0, 0, 2, -1)
+]
+
+HIGH_VALUE_TOME_SPELLS = [
+    Ingredients.fromTierArgs(4, 0, 0, 0)
+]
+
+
+def findOrderIndexForOrder(order: ClientOrder, orderCosts: [Ingredients]) -> Optional[int]:
+    for index, orderCost in enumerate(orderCosts):
+        if order.ingredients.equals(orderCost):
+            return index
+
+    return None
+
+
+def calculateBestTomeSpellsByOrderIndex() -> Dict[int, List[int]]:
+    bestTomeSpellByOrderIndex = {}
+    for orderIndex, orderCost in enumerate(ALL_ORDERS_COSTS):
+        for spellDeltaIndex, spellDelta in enumerate(ALL_TOME_SPELLS_DELTAS):
+            if spellDelta.getPositiveQuantities().has(orderCost, TOME_SPELL_ORDER_MATCHING_TARGET_PERCENTAGE):
+                matchingSpells = bestTomeSpellByOrderIndex.get(orderIndex, [])
+                matchingSpells.append(spellDeltaIndex)
+                bestTomeSpellByOrderIndex[orderIndex] = matchingSpells
+
+    return bestTomeSpellByOrderIndex
+
+
+BEST_TOME_SPELLS_BY_ORDER_INDEX = calculateBestTomeSpellsByOrderIndex()
+
+
+def getBestSpells(spells: Dict[str, Spell], curInventory: Ingredients, targetInventory: Ingredients) -> [Spell]:
+    # MAX_BEST_SPELLS_TO_CONSIDER = 4
+    # spellIdToResultingMissingIngredientsWeight = {}
+    # spellIdToResultingInventoryWeight = {}
+    spellsToSort = []
+    for spell in spells.values():
         if curInventory.has(spell.ingredients.getNegativeQuantities(True)):  # cur inventory has ingredients to cast spell
             resultingInventoryAfterSpellCast = curInventory.merge(spell.ingredients)
             if resultingInventoryAfterSpellCast.getPositiveTiersTotalQuantity() > MAX_INVENTORY_SIZE:
-                logDebug(f"Considered casting a spell that would overflow our inventory.")
+                # logDebug(f"Considered casting a spell {spell} that would overflow our inventory {curInventory}.")
                 continue
-            missingTiersForTargetInventory = curInventory.subtract(targetInventory).getNegativeTiers()
-            if spell.createsAny(missingTiersForTargetInventory) or spell.createsAny(curInventory.getMissingTiers()):
-                bestSpells.append(spell)
 
-    return bestSpells
+            spellsToSort.append(spell)
+
+    return spellsToSort
 
 
-def shouldContinueTraversal(actionsSoFar: [str]) -> bool:
-    return len(actionsSoFar) <= 15
+def shouldContinueTraversal(actionsSoFar: [str], validActionPaths: [ActionPath]) -> bool:
+    for validActionPath in validActionPaths:
+        for actionIndex in range(ACTION_PATH_DEDUPE_MAX_SIMILAR_ACTIONS):
+            if actionsSoFar[actionIndex] != validActionPath.getActions()[actionIndex]:
+                break
+            if actionIndex == ACTION_PATH_DEDUPE_MAX_SIMILAR_ACTIONS - 1:
+                return False
+
+    return len(actionsSoFar) <= 1
 
 
 def findShortestActionPath(actionPaths: [ActionPath]) -> Optional[ActionPath]:
@@ -424,13 +579,18 @@ def findClosestToTargetInventory(actionPaths: [ActionPath], targetInventory: Ing
     def calculateMissingIngredientsWeight(resultingInventoryForActionPath: Ingredients, targetInventory: Ingredients):
         return resultingInventoryForActionPath.subtract(targetInventory).getNegativeQuantities(True).getPositiveTiersWeight()
 
-    return min(actionPaths, key=lambda actionPath: calculateMissingIngredientsWeight(actionPath.getResultingInventory(), targetInventory))
+    lowestActionPath = min(actionPaths,
+        key=lambda actionPath: calculateMissingIngredientsWeight(actionPath.getResultingInventory(), targetInventory))
+    lowestActionPathWeight = calculateMissingIngredientsWeight(lowestActionPath.getResultingInventory(), targetInventory)
+    closestActionPaths = [a for a in actionPaths if calculateMissingIngredientsWeight(a.getResultingInventory(), targetInventory) == lowestActionPathWeight]
+    logDebug(f"Best action paths: {closestActionPaths}")
+    return min(closestActionPaths, key=lambda actionPath: len(actionPath.getActions()))
 
 
 def findMostCommonFirstAction(actionPaths: [ActionPath]) -> Optional[ActionPath]:
     firstActions = [a.getActions()[0] for a in actionPaths]
     firstActionCounts = Counter(firstActions)
-    logDebug(str(firstActionCounts))
+    # logDebug(str(firstActionCounts))
     mostCommonFirstAction = max(firstActionCounts, key=firstActionCounts.get)
     return ActionPath([mostCommonFirstAction], None)
 
@@ -452,25 +612,40 @@ def chooseOrder(orders: [ClientOrder], currentInventory: Ingredients) -> ClientO
     lowestWeight = calculateMissingIngredientsWeight(lowestWeightedOrder, currentInventory)
     return max([o for o in orders if calculateMissingIngredientsWeight(o, currentInventory) == lowestWeight], key=lambda order: order.price)
 
+def chooseOrderBasedOffInventoryAfterOneSpellCast(orders: [ClientOrder], currentInventory: Ingredients, spells: [Spell]) -> [ClientOrder]:
+    orderToLowestMissingIngredientsWeight = {}
+    for order in orders:
+        minMissingIngredientsWeight = None
+        for spell in spells:
+            resultingInventoryAfterSpellCast = currentInventory
+            if spell.castable:
+                resultingInventoryAfterSpellCast = currentInventory.merge(spell.ingredients)
+            missingIngredientsWeight = resultingInventoryAfterSpellCast.subtract(order.ingredients).getNegativeQuantities(True).getPositiveTiersWeight()
+            if minMissingIngredientsWeight is None or missingIngredientsWeight < minMissingIngredientsWeight:
+                minMissingIngredientsWeight = missingIngredientsWeight
 
+        orderToLowestMissingIngredientsWeight[order] = minMissingIngredientsWeight
+
+    return min(orderToLowestMissingIngredientsWeight.keys(), key=lambda orderKey: orderToLowestMissingIngredientsWeight[orderKey])
+
+@timed
 def runAlgo(gameState: GameState):
-    learnSpellMaybe = testTomeAlgo(gameState)
+    ourWitch = gameState.getOurWitch()
+    for o in gameState.clientOrders:
+        if ourWitch.hasIngredientsForOrder(o):
+            return print(o.getBrewAction())
+    chosenOrder = chooseOrderBasedOffInventoryAfterOneSpellCast(gameState.clientOrders, ourWitch.inventory, ourWitch.spellsById.values())
+    logDebug(f"Going for order={chosenOrder}")
+
+    # learnSpellMaybe = testTomeAlgo(gameState)
+    learnSpellMaybe = learnSpellsSean(gameState)
     if learnSpellMaybe is not None:
         logDebug("Learning a spell ")
         return print(learnSpellMaybe)
 
-    ourWitch = gameState.getOurWitch()
-    # TODO (algo++): actually look up the fastest order by tier weight rather than assuming the lowest priced order is the fastest
-    chosenOrder = chooseOrder(gameState.clientOrders, ourWitch.inventory)
-
     if ourWitch.hasIngredientsForOrder(chosenOrder):
         print(chosenOrder.getBrewAction())
     else:
-        # Testing if we can run the algo on each order to pick the best order
-        # for o in sortedOrdersPriceDesc[0]:
-        #     if not ourWitch.hasIngredientsForOrder(o):
-        #         logDebug(ourWitch.actionsToGetInventory(o.ingredients))
-
         actionPath = ourWitch.actionsToGetInventory(chosenOrder.ingredients)
         if actionPath is None:
             # Shouldn't happen? Hopefully
@@ -478,7 +653,6 @@ def runAlgo(gameState: GameState):
             print(ActionType.REST.value)
         else:
             logDebug(f"Chose action path with length {len(actionPath.getActions())}: {actionPath}")
-            logDebug(f"Going for order={chosenOrder}")
             print(actionPath.getActions()[0])
 
 
@@ -493,6 +667,49 @@ def testTomeAlgo(gameState: GameState) -> Optional[str]:
 
     return None
 
+
+def learnSpellsSean(gameState: GameState) -> Optional[str]:
+    def isFreeToCast(spell: TomeSpell):
+        return spell.ingredients.hasNoNegativeQuantities()
+
+    def isHighValueSpell(spell: TomeSpell):
+        return spell.ingredients in HIGH_VALUE_TOME_SPELLS
+
+    def canAffordTomeSpell(spell: TomeSpell) -> bool:
+        return gameState.getOurWitch().inventory.getQuantity(IngredientTier.TIER_0) >= spell.spellIndex
+
+    # Take free to cast spells that are in the rest couple of tome spells
+    for spell in [t for t in gameState.tomeSpells if t.spellIndex <= 2]:
+        if isFreeToCast(spell) and canAffordTomeSpell(spell):
+            return f"{ActionType.LEARN.value} {spell.spellId}"
+
+    # Learn high value spells that are in the rest couple of tome spells
+    for spell in [t for t in gameState.tomeSpells if t.spellIndex <= 2]:
+        if isHighValueSpell(spell) and canAffordTomeSpell(spell):
+            return f"{ActionType.LEARN.value} {spell.spellId}"
+
+    spellsToLearn: [Spell] = []
+    for clientOrder in gameState.clientOrders:
+        orderIndex = findOrderIndexForOrder(clientOrder, ALL_ORDERS_COSTS)
+        if orderIndex is not None and orderIndex in BEST_TOME_SPELLS_BY_ORDER_INDEX:
+            bestTomeSpellIndices = BEST_TOME_SPELLS_BY_ORDER_INDEX[orderIndex]
+            tomeSpellDeltas = list(map(lambda index: ALL_TOME_SPELLS_DELTAS[index], bestTomeSpellIndices))
+            for tomeSpellDelta in tomeSpellDeltas:
+                for spell in gameState.tomeSpells:
+                    if spell.spellIndex <=2 and canAffordTomeSpell(spell) and tomeSpellDelta.equals(spell.ingredients):
+                        spellsToLearn.append(spell)
+    if len(spellsToLearn) == 0:
+        return None
+    logDebug(f"Spells to learn: {spellsToLearn}")
+    cheapestSpellToLearn = min(spellsToLearn, key=lambda spell: spell.spellIndex)
+    return f"{ActionType.LEARN.value} {cheapestSpellToLearn.spellId}"
+
+    # numStartingSpells = 4
+    # numCurSpellsKnown = len(gameState.getOurWitch().spellsById.values())
+    # numSpellsLearnedFromTomeSoFar = numCurSpellsKnown - numStartingSpells
+    # firstSpell = next(spell for spell in gameState.tomeSpells if spell.spellIndex == 0)
+    # if numSpellsLearnedFromTomeSoFar < 5 or firstSpell.tier0Earned > 0:
+    #     return f"{ActionType.LEARN.value} {firstSpell.spellId}"
 
 while True:
     runAlgo(parseInput())
