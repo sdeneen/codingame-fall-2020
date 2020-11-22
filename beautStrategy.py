@@ -2,6 +2,7 @@
 # Write an action using print
 # in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
 import sys
+import random
 
 from typing import Optional, List, Dict
 from enum import Enum
@@ -13,6 +14,7 @@ from copy import deepcopy
 ##### Constants #####
 #####################
 MAX_INVENTORY_SIZE = 10
+SMACK_TALKS = ["Get got!", "Im gonna brew you something nice", "Whippin' it"]
 
 #####################
 ###### Toggles ######
@@ -160,7 +162,7 @@ class ClientOrder(StringRepresenter):
         self.urgencyBonus = urgencyBonus
 
     def getBrewAction(self) -> str:
-        return f"{ActionType.BREW.value} {self.orderId}"
+        return f"{ActionType.BREW.value} {self.orderId} {random.choice(SMACK_TALKS)}"
 
 
 class Spell(StringRepresenter):
