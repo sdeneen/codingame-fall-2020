@@ -21,6 +21,7 @@ HAS_INGREDIENTS_TARGET_PERCENTAGE = 0.85
 ACTION_PATH_DEDUPE_MAX_SIMILAR_ACTIONS = 2
 MAX_VALID_PATHS = 30
 TOME_SPELL_ORDER_MATCHING_TARGET_PERCENTAGE = 0.75
+MAX_ACTIONS_FOR_VALID_PATH = 1
 
 #####################
 ###### Classes ######
@@ -558,7 +559,7 @@ def shouldContinueTraversal(actionsSoFar: [str], validActionPaths: [ActionPath])
             if actionIndex == ACTION_PATH_DEDUPE_MAX_SIMILAR_ACTIONS - 1:
                 return False
 
-    return len(actionsSoFar) <= 1
+    return len(actionsSoFar) <= MAX_ACTIONS_FOR_VALID_PATH
 
 
 def findShortestActionPath(actionPaths: [ActionPath]) -> Optional[ActionPath]:
